@@ -3,134 +3,102 @@
 namespace App\Controllers;
 
 use App\Models\ArtikelModel;
-use CodeIgniter\Controller;
-use CodeIgniter\Exceptions\PageNotFoundException;
-use CodeIgniter\I18n\Time;
 
-class Artikel extends Controller
+class Artikel extends BaseController
 {
-    protected $artikel;
-
-    public function __construct()
-    {
-        $this->artikel = new ArtikelModel();
-    }
-
     public function index()
     {
         $title = 'Daftar Artikel';
-        $artikels = $this->artikel->findAll();
-
-        return view('artikel/home', compact('title', 'artikels'));
+        $model = new ArtikelModel();
+        $artikel = $model->findAll();
+        return view('artikel/index', compact('artikel', 'title'));
     }
 
-    public function detail_artikel($slug)
-{
-    $artikel = $this->artikel->where([
-        'slug' => $slug
-    ])->first();
-
-    if (!$artikel) {
-        throw PageNotFoundException::forPageNotFound();
-    }
-    $title = $artikel['judul'];
-
-    return view('artikel/detail_artikel', compact('title', 'artikel'));
-}
-public function admin()
-{
-    $title = 'Daftar Artikel';
-    $artikels = $this->artikel->findAll();
-
-    return view('artikel/admin', compact('title', 'artikels'));
-}
-public function add_artikel()
-{
-
-    $title = 'Tambah Artikel';
-    return view('artikel/tambah_artikel', compact('title'));
-}
-
-public function store()
-{
-    if (!$this->validate([
-        'judul' => [
-            'rules' => 'required',
-            'errors' => [
-                'required' => 'Judulnya wajib diisi'
-            ],
-        ],
-        'isi' => [
-            'rules' => 'min_length[10]',
-            'errors' => [
-                'min_length' => 'Minimal 10 karakter'
-            ]
-        ]
-    ])) {
-        session()->setFlashdata('errors', $this->validator->listErrors());
-        redirect()->back()->withInput();
+    public function view($slug)
+    {
+        $model = new ArtikelModel();
+        $artikel = $model->where(['slug' => $slug])->first();
+        // Menampilkan error apabila data tidak ada.
+        if (!$artikel)
+        {
+            throw PageNotFoundException::forPageNotFound();
+        }
+        $title = $artikel['judul'];
+        return view('artikel/detail', compact('artikel', 'title'));
     }
 
-    // var_dump($this->request->getPost()); die();
+    public function admin_index()
+    {
+         $title = 'Daftar Artikel';
+         $q = $this->request->getVar('q') ?? '';
+         $model = new ArtikelModel();
+         $data = [
+         'title' => $title,
+         'q' => $q,
+         'artikel' => $model->like('judul', $q)->paginate(2), # data dibatasi 2 record per halaman
+         'pager' => $model->pager,
+         ];
+         return view('artikel/admin_index', $data);
+    }
 
-    $this->artikel->insert([
-        'judul' => ucwords(strtolower($this->request->getPost('judul'))),
-        'isi' => $this->request->getPost('isi'),
-        'slug' => url_title(strtolower($this->request->getPost('judul'))),
+    public function add()
+    {
+        // validasi data.
+        $validation = \Config\Services::validation();
+        $validation->setRules(['judul' => 'required']);
+        $isDataValid = $validation->withRequest($this->request)->run();
         
-    ]);
-
-    session()->setFlashdata('success', 'Berhasil menambah data');
-    return redirect()->to('artikel/admin');
-}
-public function edit($slug)
-{
-    $data =[
-        'title' => 'Edit Artikel',
-        'artikel' => $this->artikel->where('slug', $slug)->first()
-    ];
-
-    return view('artikel/edit_artikel', $data);
-}
-
-public function update($id)
-{
-    if (!$this->validate([
-        'judul' => [
-            'rules' => 'required',
-            'errors' => [
-                'required' => 'Judulnya diisi dong sayang'
-            ],
-        ],
-        'isi' => [
-            'rules' => 'min_length[10]',
-            'errors' => [
-                'min_length' => 'Isi konten 10 karakter aja kok, yok bisa yok'
-            ]
-        ]
-    ])) {
-        session()->setFlashdata('errors', $this->validator->listErrors());
-        return redirect()->back();
+        if ($isDataValid)
+        {
+            $file = $this->request->getFile('gambar');
+            $file->move(ROOTPATH . 'public/gambar');
+            
+            $artikel = new ArtikelModel();
+            $artikel->insert([
+                'judul' => $this->request->getPost('judul'),
+                'isi' => $this->request->getPost('isi'),
+                'slug' => url_title($this->request->getPost('judul')),
+                'gambar' => $file->getName(),
+            ]);
+            return redirect('admin/artikel');
+        }
+        $title = "Tambah Artikel";
+        return view('artikel/form_add', compact('title'));
     }
 
-    $this->artikel->update($id, [
-        'judul' => ucwords(strtolower($this->request->getPost('judul'))),
-        'isi' => $this->request->getPost('isi'),
-        'slug' => url_title(strtolower($this->request->getPost('judul')))
-    ]);
+    public function edit($id)
+    {
+        $artikel = new ArtikelModel();
 
-    session()->setFlashdata('success', 'Berhasil mengubah data');
-    return redirect()->to('artikel/admin');
-}
-public function delete($slug)
-{
-    if($this->artikel->where('slug', $slug)->first() === NULL) {
-        throw PageNotFoundException::forPageNotFound('Data tidak ditemukan!');
+        // validasi data.
+        $validation = \Config\Services::validation();
+        $validation->setRules(['judul' => 'required']);
+        $isDataValid = $validation->withRequest($this->request)->run();
+        
+        if ($isDataValid)
+        {
+            $artikel->update($id, [
+                'judul' => $this->request->getPost('judul'),
+                'isi' => $this->request->getPost('isi'),]);
+            return redirect('admin/artikel');
+        }
+
+        // ambil data lama
+        $data = $artikel->where('id', $id)->first();
+        $title = "Edit Artikel";
+        return view('artikel/form_edit', compact('title', 'data'));
     }
 
-    $this->artikel->where('slug', $slug)->delete();
+    public function delete($id)
+    {
+        $artikel = new ArtikelModel();
+        $artikel->delete($id);
+        return redirect('admin/artikel');
+    }
 
-    session()->setFlashdata('success', 'Berhasil hapus data');
-    return redirect('artikel/admin');
-}
+    public function logout()
+    {
+        session()->destroy();
+        return redirect()->to('/user/login');
+    }
 }
